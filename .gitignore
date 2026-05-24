@@ -1,0 +1,16 @@
+# --- Python Specific ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# --- Environment & Secrets (CRITICAL) ---
+.env
+.flaskenv
+database.env
+*.pem
+
+# --- VS Code / System Files ---
+.vscode/
+.DS_Store
+Thumbs.db
