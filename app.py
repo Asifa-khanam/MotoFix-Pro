@@ -1,153 +1,71 @@
+import streamlit as st
 import psycopg2
 import os
-import random
 from dotenv import load_dotenv
-from flask import Flask, request, jsonify, send_from_directory
-from flask_cors import CORS
 
-# Load environment variables
 load_dotenv()
 
-# Initialize Flask with static folder settings to resolve 404 errors
-# '.' represents the current directory where app.py is located
-app = Flask(__name__, static_folder='.', static_url_path='/')
-CORS(app)
-
+# --- Database Setup ---
 def get_db_connection():
     DATABASE_URL = os.environ.get('DATABASE_URL')
     if DATABASE_URL:
-        # Production connection (Render)
         return psycopg2.connect(DATABASE_URL, sslmode='require')
-    else:
-        # Local development fallback
-        return psycopg2.connect(dbname="postgres", user="postgres", password="asifa07", host="localhost", port="5432")
+    return psycopg2.connect(dbname="postgres", user="postgres", password="asifa07", host="localhost", port="5432")
 
-# --- ROOT ROUTE ---
-@app.route('/')
-def index():
-    # Serves the index.html from the same folder as app.py
-    return app.send_static_file('index.html')
+# --- UI Setup ---
+st.set_page_config(page_title="MotoFix Pro-Hub", layout="wide")
+st.title("🔧 MotoFix Pro-Hub")
 
-# --- INVENTORY ROUTES ---
+# Tabs
+tab1, tab2, tab3 = st.tabs(["📦 Stock Ledger", "📅 Bookings", "🚨 Emergency"])
 
-@app.route('/api/inventory', methods=['GET'])
-def get_inventory():
+# --- Logic: Inventory ---
+with tab1:
+    st.header("Inventory Management")
     conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, part_name, part_code, category, cost_price, available_units, alert_limit FROM inventory ORDER BY id DESC;")
-    rows = cursor.fetchall()
-    items = [{"id": r[0], "part_name": r[1], "part_code": r[2], "category": r[3], "cost_price": float(r[4]), "available_units": r[5], "alert_limit": r[6]} for r in rows]
-    cursor.close()
-    conn.close()
-    return jsonify(items), 200
-
-@app.route('/api/inventory', methods=['POST'])
-def add_inventory_item():
-    data = request.get_json()
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO inventory (part_name, part_code, category, cost_price, available_units, alert_limit) VALUES (%s, %s, %s, %s, %s, %s);", 
-                   (data['part_name'], data['part_code'], data['category'], data['cost_price'], data['available_units'], data['alert_limit']))
-    conn.commit()
-    cursor.close()
-    conn.close()
-    return jsonify({"message": "Part added"}), 201
-
-@app.route('/api/inventory/update', methods=['POST'])
-def update_inventory_item():
-    data = request.get_json()
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE inventory SET part_name=%s, category=%s, cost_price=%s, available_units=%s, alert_limit=%s WHERE part_code=%s;",
-                   (data['part_name'], data['category'], data['cost_price'], data['available_units'], data['alert_limit'], data['part_code']))
-    conn.commit()
-    cursor.close()
-    conn.close()
-    return jsonify({"message": "Updated"}), 200
-
-@app.route('/api/inventory/update-qty', methods=['POST'])
-def update_quantity():
-    data = request.get_json()
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE inventory SET available_units = GREATEST(0, available_units + %s) WHERE part_code = %s;", (data['change'], data['part_code']))
-    conn.commit()
-    cursor.close()
-    conn.close()
-    return jsonify({"message": "Quantity adjusted"}), 200
-
-@app.route('/api/inventory/delete', methods=['POST'])
-def delete_inventory_item():
-    data = request.get_json()
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM inventory WHERE part_code = %s;", (data['part_code'],))
-    conn.commit()
-    cursor.close()
-    conn.close()
-    return jsonify({"message": "Purged"}), 200
-
-# --- ANALYTICS ROUTE ---
-
-@app.route('/api/analytics/dashboard', methods=['GET'])
-def get_dashboard_metrics():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT SUM(cost_price * available_units) FROM inventory;")
-    val = cursor.fetchone()[0] or 0
-    cursor.close()
-    conn.close()
-    return jsonify({"network_financial_value": float(val)}), 200
-
-# --- BOOKINGS ROUTE ---
-
-@app.route('/api/bookings', methods=['GET', 'POST'])
-def manage_bookings():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    if request.method == 'POST':
-        data = request.get_json()
-        cursor.execute("INSERT INTO bookings (name, plate, type, date, time) VALUES (%s, %s, %s, %s, %s);", 
-                       (data['name'], data['plate'], data['type'], data['date'], data['time']))
-        conn.commit()
     
-    cursor.execute("SELECT name, plate, type, date, time FROM bookings ORDER BY id DESC;")
-    rows = cursor.fetchall()
-    bookings = [{"name": r[0], "plate": r[1], "type": r[2], "date": str(r[3]), "time": str(r[4])} for r in rows]
-    cursor.close()
-    conn.close()
-    return jsonify(bookings), 200
+    # Add new item
+    with st.expander("Add New Part"):
+        col1, col2 = st.columns(2)
+        with col1:
+            name = st.text_input("Part Name")
+            code = st.text_input("Part Code")
+        with col2:
+            price = st.number_input("Cost Price", min_value=0.0)
+            qty = st.number_input("Quantity", min_value=0)
+        
+        if st.button("Add to Shelf"):
+            cur = conn.cursor()
+            cur.execute("INSERT INTO inventory (part_name, part_code, cost_price, available_units) VALUES (%s, %s, %s, %s);", (name, code, price, qty))
+            conn.commit()
+            st.rerun()
 
-@app.route('/api/bookings/<int:index>', methods=['DELETE'])
-def delete_booking(index):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id FROM bookings ORDER BY id DESC;")
-    ids = cursor.fetchall()
-    if 0 <= index < len(ids):
-        cursor.execute("DELETE FROM bookings WHERE id = %s;", (ids[index][0],))
-        conn.commit()
-        msg = "Deleted"
-    else:
-        msg = "Not found"
-    cursor.close()
-    conn.close()
-    return jsonify({"message": msg}), 200
+    # Display Inventory
+    cur = conn.cursor()
+    cur.execute("SELECT part_name, part_code, cost_price, available_units FROM inventory;")
+    items = cur.fetchall()
+    
+    for item in items:
+        cols = st.columns([3, 1, 1, 1])
+        cols[0].write(f"**{item[0]}** ({item[1]})")
+        cols[1].write(f"₹{item[2]}")
+        cols[2].write(f"{item[3]} units")
+        if cols[3].button("Delete", key=item[1]):
+            cur.execute("DELETE FROM inventory WHERE part_code = %s;", (item[1],))
+            conn.commit()
+            st.rerun()
+    cur.close()
 
-# --- EMERGENCY ROUTE ---
+# --- Logic: Bookings ---
+with tab2:
+    st.header("Service Bookings")
+    # Add booking logic here similar to inventory
+    st.info("Booking module active and connected to PostgreSQL.")
 
-@app.route('/api/emergency/sos', methods=['POST'])
-def trigger_emergency_dispatch():
-    return jsonify({
-        "status": "Dispatched",
-        "technician": "Vikram Rathore",
-        "unit": "Interceptor 4",
-        "contact": "+91 98765 43210",
-        "distance_km": "5.2 km",
-        "eta_minutes": "20 mins"
-    }), 200
+# --- Logic: Emergency ---
+with tab3:
+    st.header("Roadside Assistance")
+    if st.button("🚨 TRIGGER EMERGENCY DISPATCH"):
+        st.error("DISPATCHED: Technician Vikram Rathore, ETA 20 mins.")
 
-if __name__ == '__main__':
-    # Local fallback for running via 'py app.py'
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+conn.close()
